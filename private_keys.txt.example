@@ -1,0 +1,11 @@
+# ==============================================================
+# vAPI Network - Private Keys List (1 baris per wallet)
+# ==============================================================
+# Anda dapat memasukkan Private Key (0x...) atau 12/24 Mnemonic Seed Phrase.
+# File ini diabaikan oleh .gitignore agar data Anda tetap aman.
+#
+# Contoh format Private Key:
+# 0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+#
+# Contoh format Seed Phrase:
+# apple banana cherry date elderberry fig grape honeydew kiwi lemon mango nectarine

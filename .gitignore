@@ -1,0 +1,36 @@
+# ============================================================
+# CRITICAL SECURITY: Do NOT commit private keys, tokens, or proxies!
+# ============================================================
+private_keys.txt
+tokens.txt
+proxies.txt
+.env
+*.env
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Logs & Runtime
+*.log
+*.sqlite
+*.pid
+
+# Virtual Environments
+venv/
+env/
+.venv/
+ENV/
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# OS Metadata
+.DS_Store
+Thumbs.db

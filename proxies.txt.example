@@ -1,0 +1,7 @@
+# ==============================================================
+# vAPI Network - Proxies List (Opsional, 1 baris per wallet)
+# ==============================================================
+# Format yang didukung:
+# http://host:port
+# http://username:password@host:port
+# socks5://username:password@host:port

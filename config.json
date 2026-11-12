@@ -1,0 +1,9 @@
+{
+  "referral_code": "",
+  "base_url": "https://api.vapinetwork.ai",
+  "auto_mint_id": true,
+  "auto_daily_checkin": true,
+  "auto_complete_quests": true,
+  "quest_delay_seconds": 1,
+  "account_delay_seconds": 2
+}
