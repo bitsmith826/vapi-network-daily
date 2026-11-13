@@ -61,6 +61,8 @@ DEFAULT_CONFIG = {
     "auto_mint_id": True,
     "auto_daily_checkin": True,
     "auto_complete_quests": True,
+    "auto_router_key": True,
+    "auto_connect_agent": True,
     "quest_delay_seconds": 1,
     "account_delay_seconds": 2
 }
@@ -534,6 +536,94 @@ class VapiClient:
         except Exception as e:
             return {"error": str(e), "status": 0}
 
+    def create_router_key(self, label="daily-bot"):
+        """Creates a router key using compute source (100% free) if not already created"""
+        try:
+            res_get = self.session.get(f"{self.base_url}/api/router/keys", timeout=15)
+            if res_get.status_code == 200:
+                data = res_get.json()
+                if data.get("keyCount", 0) > 0:
+                    return True
+            res_post = self.session.post(f"{self.base_url}/api/router/keys", json={
+                "label": label,
+                "source": "compute"
+            }, timeout=15)
+            return res_post.status_code in (200, 201)
+        except Exception:
+            return False
+
+    def connect_agent(self):
+        """Connects an agent to the account via OAuth device authorization in pure Python (100% free)"""
+        try:
+            # 1. Ephemeral agent wallet
+            agent = Account.create()
+
+            # 2. Nonce
+            r_nonce = self.session.get(f"{self.base_url}/api/auth/siwe-nonce?purpose=link", timeout=15)
+            if r_nonce.status_code != 200:
+                return False
+            nonce = r_nonce.json().get("nonce")
+            if not nonce:
+                return False
+
+            # 3. SIWE message
+            now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+            msg = (
+                f"api.vapinetwork.ai wants you to sign in with your Ethereum account:\n"
+                f"{agent.address}\n\n"
+                f"Link this wallet to a vAPI account as an agent.\n\n"
+                f"URI: {self.base_url}\n"
+                f"Version: 1\n"
+                f"Chain ID: 8453\n"
+                f"Nonce: {nonce}\n"
+                f"Issued At: {now_iso}"
+            )
+            sig = agent.sign_message(encode_defunct(text=msg)).signature.hex()
+            if not sig.startswith("0x"):
+                sig = "0x" + sig
+
+            # 4. Device authorization
+            auth_payload = {
+                "agent_message": msg,
+                "agent_signature": sig,
+                "label": "main",
+                "scope": "mcp:call router.use tasks:read tasks:write",
+                "router_allowance_usd": 1.0
+            }
+            r_auth = self.session.post(f"{self.base_url}/oauth/device_authorization", json=auth_payload, timeout=15)
+            if r_auth.status_code != 200:
+                return False
+            auth_data = r_auth.json()
+            device_code = auth_data.get("device_code")
+            user_code = auth_data.get("user_code")
+            client_id = auth_data.get("client_id", "vapi-network")
+
+            # 5. Owner approval via logged-in session
+            approve_data = {
+                "code": user_code,
+                "intent": "approve",
+                "routerAllowanceUsd": "1.00"
+            }
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": f"{self.base_url}/link?code={user_code}",
+                "Origin": self.base_url
+            }
+            r_app = self.session.post(f"{self.base_url}/link", data=approve_data, headers=headers, timeout=15)
+            if r_app.status_code != 200:
+                return False
+
+            # 6. Finalize token exchange
+            poll_data = {
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": device_code,
+                "client_id": client_id
+            }
+            requests.post(f"{self.base_url}/oauth/token", data=poll_data, timeout=15)
+            return True
+        except Exception:
+            return False
+
 def format_countdown(iso_str):
     if not iso_str:
         return "Siap"
@@ -675,11 +765,33 @@ def process_single_account(idx, total, raw_token, proxy, config):
                 checkin_str = outcome.get("kind", "Sudah")
                 log(f"  [dim]•[/dim] [cyan]Daily Check-in[/cyan]  : [dim cyan]{checkin_str}[/dim cyan]")
 
-    # 4. Quests Automation (Clean, Fast & Silent on unavailable)
+    # 4. Quests Automation (Clean, Fast & Platform Tasks)
     quests_done_count = 0
     total_quests = 0
 
     if config.get("auto_complete_quests", True):
+        # Auto platform quests: Router Key & Connect Agent
+        router_q = None
+        agent_q = None
+        for sec in sections:
+            for q in sec.get("quests", []):
+                t_lower = q.get("title", "").lower()
+                if "router key" in t_lower:
+                    router_q = q
+                elif "connect an agent" in t_lower or ("connect" in t_lower and "agent" in t_lower):
+                    agent_q = q
+
+        if config.get("auto_router_key", True) and router_q and router_q.get("state") != "completed":
+            if client.create_router_key():
+                log(f"  [dim]•[/dim] [cyan]Router Key[/cyan]      : [bold green]Created (+150 pts)[/bold green]")
+                time.sleep(1)
+
+        if config.get("auto_connect_agent", True) and agent_q and agent_q.get("state") != "completed":
+            if client.connect_agent():
+                log(f"  [dim]•[/dim] [cyan]Connect Agent[/cyan]   : [bold green]Linked (+250 pts)[/bold green]")
+                time.sleep(1)
+
+        # Standard quest loop
         for sec in sections:
             for q in sec.get("quests", []):
                 q_id = q.get("id")
@@ -700,6 +812,10 @@ def process_single_account(idx, total, raw_token, proxy, config):
                 if inputs and len(inputs) > 0:
                     continue
 
+                # Skip platform quests from manual button attempt since they reconcile automatically
+                if "router key" in q_title.lower() or "connect an agent" in q_title.lower():
+                    continue
+
                 # Only attempt available quests
                 if q_state in ("available", None):
                     act = "verify" if q_action == "verify" else "claim"
@@ -712,8 +828,6 @@ def process_single_account(idx, total, raw_token, proxy, config):
                         quests_done_count += 1
                         time.sleep(1)
 
-    log(f"  [dim]•[/dim] [cyan]Board Quests[/cyan]    : [bold magenta]{quests_done_count}/{total_quests} Selesai[/bold magenta]")
-
     # 5. Final Points & Rank
     final_board = client.get_board(fresh=True)
     if final_board and "board" in final_board:
@@ -721,6 +835,21 @@ def process_single_account(idx, total, raw_token, proxy, config):
         if isinstance(b_sub.get("points"), dict):
             current_points = b_sub["points"].get("total", current_points)
             user_rank = b_sub["points"].get("rank", user_rank)
+        # Recount completed quests after potential platform quest updates
+        f_sections = b_sub.get("sections", [])
+        q_done_fresh = 0
+        q_tot_fresh = 0
+        for s in f_sections:
+            for q in s.get("quests", []):
+                if daily_quest and q.get("id") == daily_quest.get("id"):
+                    continue
+                q_tot_fresh += 1
+                if q.get("state") == "completed":
+                    q_done_fresh += 1
+        quests_done_count = max(quests_done_count, q_done_fresh)
+        total_quests = max(total_quests, q_tot_fresh)
+
+    log(f"  [dim]•[/dim] [cyan]Board Quests[/cyan]    : [bold magenta]{quests_done_count}/{total_quests} Selesai[/bold magenta]")
 
     rank_str = f"#{user_rank:,}" if (user_rank and isinstance(user_rank, int)) else (f"#{user_rank}" if (user_rank and str(user_rank).strip() not in ("None", "-", "")) else "Active")
     log(f"  [dim]•[/dim] [cyan]Poin & Rank[/cyan]     : [bold green]{current_points:,} pts[/bold green] │ [bold yellow]Rank {rank_str}[/bold yellow]")

@@ -4,6 +4,8 @@
   "auto_mint_id": true,
   "auto_daily_checkin": true,
   "auto_complete_quests": true,
+  "auto_router_key": true,
+  "auto_connect_agent": true,
   "quest_delay_seconds": 1,
   "account_delay_seconds": 2
 }
