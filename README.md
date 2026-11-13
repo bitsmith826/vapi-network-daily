@@ -12,7 +12,8 @@ Bot ini didesain **All-in-One**, 100% headless (di latar belakang), tanpa perlu 
 - ⚡ **Auto Onboarding Profil**: Otomatis mengatur avatar & username akun baru serta langsung mengklaim **+500 Poin bonus**.
 - 🆔 **Auto Mint vAPI ID**: Mengirimkan transaksi minting identitas digital vAPI di Base Network via sponsor relayer.
 - 📅 **Daily Check-in**: Otomatis mengklaim poin harian (+10 pts) atau mendeteksi waktu cooldown jika sudah diklaim.
-- 🎯 **Quests Automation**: Otomatis menyelesaikan quest yang tersedia secara cepat dan efisien.
+- 🎯 **Quests Automation**: Otomatis menyelesaikan platform quests gratis (*Create Router Key* +150 pts, *Connect an Agent* +250 pts).
+- 🌐 **List your API Automation (+500 pts/wallet)**: Otomatis memvalidasi, menandatangani SIWE payout, dan melisting endpoint x402 ke katalog vAPI via Cloudflare Worker multi-wallet gratis tanpa modal.
 - 📊 **Tampilan Terminal Presisi Berwarna**: Menampilkan ringkasan seluruh wallet, poin, dan rank global secara rapi.
 
 ---
@@ -52,6 +53,19 @@ python main.py
 ```
 
 *(Di Windows, Anda juga bisa langsung klik dua kali file **`run_daily.bat`**)*
+
+---
+
+## 🌐 Bonus Quest: "List your API on vAPI" (+500 pts per Wallet)
+
+Untuk menyelesaikan quest publikasi API tanpa biaya modal/server:
+1. Buat Cloudflare Worker gratis di [dash.cloudflare.com](https://dash.cloudflare.com) (menu Workers & Pages -> Create application).
+2. Salin kode dari [`cloudflare_worker.js`](cloudflare_worker.js) ke editor Cloudflare Worker lalu klik **Deploy**.
+3. Jalankan script publikasi:
+   ```bash
+   python publish_listings.py https://<worker-anda>.workers.dev
+   ```
+   Script ini otomatis mem-probe endpoint x402, menandatangani pesan EIP-4361 SIWE Payout, mempublikasikan listing, dan mengaktifkannya ke status `listed` untuk seluruh wallet Anda (+500 Poin instan per wallet).
 
 ---
 
