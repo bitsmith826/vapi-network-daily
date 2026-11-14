@@ -14,6 +14,8 @@ import time
 import json
 import uuid
 import re
+import base64
+import urllib.parse
 from datetime import datetime, timezone
 
 # Ensure UTF-8 output on Windows terminal / VS Code
@@ -160,6 +162,70 @@ def shorten_address(addr):
     if not addr or len(addr) < 12:
         return str(addr)
     return f"{addr[:6]}...{addr[-4:]}"
+
+SUPABASE_ANON_KEY = "sb_publishable_oXn0yZi1vA4vDnhcVXUH-A_TvFaK3m7"
+SUPABASE_REFRESH_URL = "https://uxajzjyqicllxoplzgtk.supabase.co/auth/v1/token?grant_type=refresh_token"
+
+def refresh_supabase_token(cookie_str):
+    """
+    Directly refreshes an expired Supabase session using the embedded refresh_token.
+    Takes ~100ms and completely bypasses Turnstile challenges & Camoufox browser overhead.
+    """
+    try:
+        chunks = {}
+        other_cookies = []
+        for part in cookie_str.strip().split(";"):
+            if not part.strip():
+                continue
+            if "=" in part:
+                k, v = part.strip().split("=", 1)
+                if "sb-uxajzjyqicllxoplzgtk-auth-token" in k:
+                    chunks[k] = v
+                else:
+                    other_cookies.append(part.strip())
+        
+        combined = ""
+        if "sb-uxajzjyqicllxoplzgtk-auth-token.0" in chunks:
+            combined = chunks["sb-uxajzjyqicllxoplzgtk-auth-token.0"] + chunks.get("sb-uxajzjyqicllxoplzgtk-auth-token.1", "")
+        elif "sb-uxajzjyqicllxoplzgtk-auth-token" in chunks:
+            combined = chunks["sb-uxajzjyqicllxoplzgtk-auth-token"]
+        
+        val = urllib.parse.unquote(combined)
+        if val.startswith("base64-"):
+            b = val[7:]
+            b += "=" * (-len(b) % 4)
+            val = base64.b64decode(b).decode("utf-8", errors="ignore")
+        
+        sess = json.loads(val)
+        rt = sess.get("refresh_token")
+        if not rt:
+            return None
+        
+        r = requests.post(
+            SUPABASE_REFRESH_URL,
+            headers={"apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json"},
+            json={"refresh_token": rt},
+            timeout=15
+        )
+        if r.status_code != 200:
+            return None
+        
+        new_data = r.json()
+        new_raw = "base64-" + base64.b64encode(json.dumps(new_data).encode()).decode()
+        
+        new_parts = list(other_cookies)
+        CHUNK_SIZE = 3180
+        if len(new_raw) > CHUNK_SIZE:
+            c0 = new_raw[:CHUNK_SIZE]
+            c1 = new_raw[CHUNK_SIZE:]
+            new_parts.append(f"sb-uxajzjyqicllxoplzgtk-auth-token.0={urllib.parse.quote(c0)}")
+            new_parts.append(f"sb-uxajzjyqicllxoplzgtk-auth-token.1={urllib.parse.quote(c1)}")
+        else:
+            new_parts.append(f"sb-uxajzjyqicllxoplzgtk-auth-token={urllib.parse.quote(new_raw)}")
+        
+        return "; ".join(new_parts)
+    except Exception:
+        return None
 
 def test_token_valid(cookie_str, base_url="https://api.vapinetwork.ai"):
     """Quick check if a session cookie is still valid without doing full UI"""
@@ -412,6 +478,8 @@ class VapiClient:
             self.session.cookies.set("vapi_ref", self.ref_code, domain="api.vapinetwork.ai")
 
         token = self.raw_token
+        # Ensure Cookie header is explicitly sent on all requests for 100% session persistence
+        self.session.headers["Cookie"] = token
         if "=" in token and ";" in token:
             for part in token.split(";"):
                 if "=" in part:
@@ -970,14 +1038,37 @@ def main():
 
     log_info(f"Ditemukan [bold cyan]{len(pkeys)} Wallet[/bold cyan] di {PKEYS_FILE}.")
 
+    # Verify and auto-refresh sessions
+    final_tokens = []
+    tokens_updated = False
+    for idx, tok in enumerate(existing_tokens, 1):
+        addr = test_token_valid(tok)
+        if addr:
+            final_tokens.append(tok)
+        else:
+            # Try instant pure-Python Supabase refresh
+            refreshed = refresh_supabase_token(tok)
+            if refreshed and test_token_valid(refreshed):
+                final_tokens.append(refreshed)
+                tokens_updated = True
+                log_success(f"Sesi Akun #{idx} berhasil diperbarui instan via Supabase!")
+            else:
+                final_tokens.append(tok)
+
+    if tokens_updated:
+        with open(TOKENS_FILE, "w", encoding="utf-8") as f:
+            for tok in final_tokens:
+                f.write(f"{tok}\n")
+        existing_tokens = final_tokens
+
     # If tokens are fewer than private keys or missing, auto-authenticate with Camoufox!
     if len(existing_tokens) < len(pkeys):
         tokens = auto_login_with_camoufox(pkeys, existing_tokens, config)
     else:
-        # Check if first token is valid, if not refresh all
+        # Check if first token is valid, if not refresh via Camoufox as fallback
         first_valid = test_token_valid(existing_tokens[0]) if existing_tokens else None
         if not first_valid:
-            log_warn("Sesi yang tersimpan kadaluarsa. Memperbarui otomatis via Camoufox...")
+            log_warn("Sesi Supabase gagal diperbarui. Mencoba via Camoufox...")
             tokens = auto_login_with_camoufox(pkeys, None, config)
         else:
             tokens = existing_tokens
