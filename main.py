@@ -233,6 +233,7 @@ def test_token_valid(cookie_str, base_url="https://api.vapinetwork.ai"):
     s.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
         "Referer": f"{base_url}/earn",
         "Cookie": cookie_str
     })
@@ -667,17 +668,21 @@ class VapiClient:
             client_id = auth_data.get("client_id", "vapi-network")
 
             # 5. Owner approval via logged-in session
+            acc = self.get_account()
+            owner_addr = acc.get("profile", {}).get("walletAddress") if acc else None
+
             approve_data = {
                 "code": user_code,
-                "intent": "approve",
-                "routerAllowanceUsd": "1.00"
+                "expectedOwnerWallet": owner_addr,
+                "routerAllowanceUsd": "1.00",
+                "intent": "approve"
             }
             headers = {
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Referer": f"{self.base_url}/link?code={user_code}",
                 "Origin": self.base_url
             }
-            r_app = self.session.post(f"{self.base_url}/link", data=approve_data, headers=headers, timeout=15)
+            r_app = self.session.post(f"{self.base_url}/link?code={user_code}", data=approve_data, headers=headers, timeout=15)
             if r_app.status_code != 200:
                 return False
 
@@ -687,7 +692,7 @@ class VapiClient:
                 "device_code": device_code,
                 "client_id": client_id
             }
-            requests.post(f"{self.base_url}/oauth/token", data=poll_data, timeout=15)
+            requests.post(f"{self.base_url}/oauth/token", json=poll_data, timeout=15)
             return True
         except Exception:
             return False
@@ -1065,10 +1070,15 @@ def main():
     if len(existing_tokens) < len(pkeys):
         tokens = auto_login_with_camoufox(pkeys, existing_tokens, config)
     else:
-        # Check if first token is valid, if not refresh via Camoufox as fallback
+        # Check if first token is valid, or refresh it
         first_valid = test_token_valid(existing_tokens[0]) if existing_tokens else None
+        if not first_valid and existing_tokens:
+            ref = refresh_supabase_token(existing_tokens[0])
+            if ref and test_token_valid(ref):
+                first_valid = True
+                existing_tokens[0] = ref
         if not first_valid:
-            log_warn("Sesi Supabase gagal diperbarui. Mencoba via Camoufox...")
+            log_warn("Sesi Supabase gagal diverifikasi. Mencoba via Camoufox...")
             tokens = auto_login_with_camoufox(pkeys, None, config)
         else:
             tokens = existing_tokens
